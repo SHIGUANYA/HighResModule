@@ -35,6 +35,12 @@ android {
     }
 }
 
+// ★ 关键：加上 repositories，否则 Xposed API 下载不下来
+repositories {
+    google()
+    mavenCentral()
+}
+
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
     compileOnly("de.robv.android.xposed:api:82")
