@@ -1,3 +1,4 @@
+// app/build.gradle.kts
 plugins {
     id("com.android.application") version "8.2.0"
     id("org.jetbrains.kotlin.android") version "1.9.0"
@@ -13,7 +14,10 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-        ndk { abiFilters += "arm64-v8a" }
+
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
     }
 
     buildTypes {
@@ -27,10 +31,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
-    kotlinOptions { jvmTarget = "1.8" }
+    kotlinOptions {
+        jvmTarget = "1.8"
+    }
 }
 
-// ★ 关键：保留 repositories，但删除 Xposed 依赖
 repositories {
     google()
     mavenCentral()
@@ -39,6 +44,5 @@ repositories {
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
-    // ★ 删除 compileOnly("de.robv.android.xposed:api:xx")
-    // Xposed API 运行时由框架提供，编译期不需要真实 JAR
+    // 删除 Xposed 依赖 - 运行时由框架提供，编译期不需要
 }
