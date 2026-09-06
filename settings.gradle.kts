@@ -1,9 +1,10 @@
 pluginManagement {
     repositories {
         gradlePluginPortal()
+        maven { url = uri("https://maven.google.com") }  // 必须第一位
         google()
         mavenCentral()
-        maven { url = uri("https://maven.google.com") }  // 关键：显式加上 Google Maven
+        gradlePluginPortal()
     }
 }
 rootProject.name = "HighResModule"
