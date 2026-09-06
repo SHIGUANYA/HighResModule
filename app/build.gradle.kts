@@ -35,10 +35,10 @@ android {
     }
 }
 
-// ★ 关键：加上 repositories，否则 Xposed API 下载不下来
 repositories {
     google()
     mavenCentral()
+    maven { url = uri("https://jitpack.io") }
 }
 
 dependencies {
