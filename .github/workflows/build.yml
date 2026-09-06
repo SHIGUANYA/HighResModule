@@ -23,6 +23,11 @@ jobs:
           api-level: 34
           ndk-version: r26c
           
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.5'
+          
       - name: Generate Gradle Wrapper
         run: |
           cd app
