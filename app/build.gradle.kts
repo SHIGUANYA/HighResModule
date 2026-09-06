@@ -44,5 +44,5 @@ repositories {
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
-    compileOnly("de.robv.android.xposed:api:83")  // ★ 改为 83
+    compileOnly("de.robv.android.xposed:api:87")  // ★ 改为 87（存在的版本）
 }
