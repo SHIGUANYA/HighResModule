@@ -40,15 +40,13 @@ jobs:
           
       - name: Generate Gradle Wrapper
         run: |
-          cd app
           gradle wrapper --gradle-version 8.5 --distribution-type bin
           
       - name: Make gradlew executable
-        run: chmod +x ./gradlew
+        run: chmod +x gradlew
           
       - name: Build Release APK
         run: |
-          cd app
           ./gradlew assembleRelease --no-daemon --stacktrace --info
         env:
           GRADLE_OPTS: "-Xmx4g -Dorg.gradle.daemon=false"
