@@ -33,10 +33,10 @@ android {
 repositories {
     google()
     mavenCentral()
-    maven { url = uri("https://jitpack.io") }
+    maven { url = uri("https://jitpack.io") }  // ★ 必须：JitPack 托管 XposedBridge
 }
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
-    // ★ 彻底删除 Xposed 依赖 - 运行时由框架提供
+    compileOnly("com.github.rovo89:XposedBridge:82")  // ★ 关键：从 JitPack 拉取 XposedBridge (v82 存在)
 }
