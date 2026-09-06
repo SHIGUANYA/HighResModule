@@ -39,6 +39,7 @@ repositories {
     google()
     mavenCentral()
     maven { url = uri("https://jitpack.io") }
+    maven { url = uri("https://api.xposed.info/maven/") }  // ★ 关键：Xposed 官方 Maven 仓库
 }
 
 dependencies {
