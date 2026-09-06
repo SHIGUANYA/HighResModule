@@ -13,10 +13,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0"
-
-        ndk {
-            abiFilters += "arm64-v8a"
-        }
+        ndk { abiFilters += "arm64-v8a" }
     }
 
     buildTypes {
@@ -30,19 +27,18 @@ android {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
+    kotlinOptions { jvmTarget = "1.8" }
 }
 
+// ★ 关键：保留 repositories，但删除 Xposed 依赖
 repositories {
     google()
     mavenCentral()
     maven { url = uri("https://jitpack.io") }
-    maven { url = uri("https://api.xposed.info/maven/") }  // ★ 关键：Xposed 官方 Maven 仓库
 }
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
-    compileOnly("de.robv.android.xposed:api:87")  // ★ 改为 87（存在的版本）
+    // ★ 删除 compileOnly("de.robv.android.xposed:api:xx")
+    // Xposed API 运行时由框架提供，编译期不需要真实 JAR
 }
