@@ -23,6 +23,11 @@ jobs:
           api-level: 34
           ndk-version: r26c
           
+      - name: Generate Gradle Wrapper
+        run: |
+          cd app
+          gradle wrapper --gradle-version 8.5 --distribution-type bin
+          
       - name: Make gradlew executable
         run: chmod +x ./gradlew
         
