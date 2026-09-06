@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       
@@ -23,22 +24,30 @@ jobs:
         with:
           api-level: 34
           ndk-version: r26c
+          cache: gradle
           
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.5'
+          cache-read-only: false
           
       - name: Create local.properties
         run: |
           echo "sdk.dir=${{ steps.setup-android.outputs.sdk-path }}" > app/local.properties
+          echo "cmake.dir=${{ steps.setup-android.outputs.ndk-path }}/cmake/3.22.1" >> app/local.properties
           cat app/local.properties
           
       - name: Build Release APK
-        run: gradle assembleRelease
-        
+        run: |
+          cd app
+          ./gradlew assembleRelease --no-daemon --stacktrace --info
+        env:
+          GRADLE_OPTS: "-Xmx4g -Dorg.gradle.daemon=false"
+          
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: HighResModule-APK
           path: app/build/outputs/apk/release/app-release.apk
+          retention-days: 7
