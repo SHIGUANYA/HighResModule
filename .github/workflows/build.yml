@@ -38,6 +38,14 @@ jobs:
           echo "cmake.dir=${{ steps.setup-android.outputs.ndk-path }}/cmake/3.22.1" >> app/local.properties
           cat app/local.properties
           
+      - name: Generate Gradle Wrapper
+        run: |
+          cd app
+          gradle wrapper --gradle-version 8.5 --distribution-type bin
+          
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+          
       - name: Build Release APK
         run: |
           cd app
