@@ -62,10 +62,9 @@ jobs:
           echo "NDK path: $NDK"
           CLANG=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang
           echo "Using clang: $CLANG"
-          $CLANG -O2 -o set_render_level \
+          $CLANG -O2 -static -o set_render_level \
             app/src/main/cpp/native_helper.cpp \
-            -DSTANDALONE_EXE \
-            -llog -ldl
+            -DSTANDALONE_EXE
           chmod +x set_render_level
           file set_render_level
           

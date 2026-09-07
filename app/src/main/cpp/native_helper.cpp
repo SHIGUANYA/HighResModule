@@ -1,18 +1,23 @@
+#ifndef STANDALONE_EXE
 #include <jni.h>
 #include <android/log.h>
 #include <dlfcn.h>
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
+#else
+#include <cstdio>
+#define LOGI(...) printf(__VA_ARGS__)
+#define LOGE(...) printf(__VA_ARGS__)
+#endif
+
 #include <cstring>
 #include <string>
-#include <cstdio>
 #include <cstdlib>
+#include <cstdio>
 #include <unistd.h>
 #include <sys/uio.h>
 #include <dirent.h>
 #include <sys/stat.h>
-
-#define LOG_TAG "HighResNative"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
 static pid_t findMainGamePid() {
     DIR* proc = opendir("/proc");
@@ -57,6 +62,7 @@ static ssize_t writeRemote(pid_t pid, void* remoteAddr, void* localBuf, size_t l
     return process_vm_writev(pid, &local, 1, &remote, 1, 0);
 }
 
+#ifndef STANDALONE_EXE
 extern "C" {
 
 JNIEXPORT jboolean JNICALL
@@ -229,9 +235,9 @@ Java_com_hook_highres_NativeHelper_findAndHookCVar(JNIEnv* env, jclass clazz) {
 }
 
 } // extern "C"
+#endif // !STANDALONE_EXE
 
 #ifdef STANDALONE_EXE
-#include <cstdio>
 
 static pid_t findMainGamePid_standalone() {
     DIR* proc = opendir("/proc");
