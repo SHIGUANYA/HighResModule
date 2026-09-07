@@ -53,13 +53,3 @@ dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
     compileOnly(files("libs/xposed-api.jar"))
 }
-
-tasks.register<Copy>("copyStandaloneExe") {
-    dependsOn("assembleRelease")
-    from("${buildDir}/intermediates/cmake/release/obj/arm64-v8a/set_render_level")
-    into("src/main/assets")
-}
-
-afterEvaluate {
-    tasks.findByName("mergeReleaseAssets")?.dependsOn("copyStandaloneExe")
-}
