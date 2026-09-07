@@ -1,11 +1,11 @@
 package com.hook.highres;
 
 import android.util.Log;
-import v.Bsgm.HDFKz.IXposedHookLoadPackage;
-import v.Bsgm.HDFKz.XC_MethodHook;
-import v.Bsgm.HDFKz.XposedBridge;
-import v.Bsgm.HDFKz.callbacks.XC_LoadPackage;
-import v.Bsgm.HDFKz.callbacks.XC_LoadPackage.LoadPackageParam;
+import de.robv.android.xposed.IXposedHookLoadPackage;
+import de.robv.android.xposed.XC_MethodHook;
+import de.robv.android.xposed.XposedBridge;
+import de.robv.android.xposed.callbacks.XC_LoadPackage;
+import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
 
 public class HighResModule implements IXposedHookLoadPackage {
     private static final String TAG = "HighResModule";
