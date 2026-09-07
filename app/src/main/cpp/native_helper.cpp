@@ -322,7 +322,46 @@ int main(int argc, char* argv[]) {
 
     printf("[set_render_level] Found %d readable segments\n", segCount);
 
-    // Scan ALL segments for the CVar name string
+    // Search mode: find all strings matching a pattern
+    if (argc > 2 && strcmp(argv[1], "search") == 0) {
+        const char* pattern = argv[2];
+        size_t patLen = strlen(pattern);
+        printf("[set_render_level] Searching for pattern: '%s'\n", pattern);
+        const size_t SCAN_CHUNK = 65536;
+        unsigned char* buf = (unsigned char*)malloc(SCAN_CHUNK);
+        int found = 0;
+        for (int s = 0; s < segCount; s++) {
+            uintptr_t segS = segStarts[s], segE = segEnds[s];
+            for (uintptr_t addr = segS; addr < segE; addr += SCAN_CHUNK - patLen) {
+                size_t toRead = SCAN_CHUNK;
+                if (addr + toRead > segE) toRead = segE - addr;
+                ssize_t nread = readRemote_standalone(mainPid, (void*)addr, buf, toRead);
+                if (nread <= 0) continue;
+                for (size_t i = 0; i + patLen <= (size_t)nread; i++) {
+                    if (memcmp(buf + i, pattern, patLen) == 0) {
+                        // Print the surrounding string
+                        size_t start = i > 32 ? i - 32 : 0;
+                        size_t end = i + patLen + 64;
+                        if (end > (size_t)nread) end = nread;
+                        // Ensure null termination
+                        char str[128] = {0};
+                        size_t len = end - start;
+                        if (len > 127) len = 127;
+                        memcpy(str, buf + start, len);
+                        printf("[set_render_level] Found at %lx: ...%s...\n", addr + i, str);
+                        found++;
+                        if (found >= 50) { printf("[set_render_level] Too many matches, stopping\n"); free(buf); return 0; }
+                        i += patLen - 1;
+                    }
+                }
+            }
+        }
+        printf("[set_render_level] Total matches: %d\n", found);
+        free(buf);
+        return 0;
+    }
+
+    // Normal mode: modify CVar
     uintptr_t stringAddr = 0;
     const size_t SCAN_CHUNK = 65536;
     unsigned char* buf = (unsigned char*)malloc(SCAN_CHUNK);
