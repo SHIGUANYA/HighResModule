@@ -229,3 +229,186 @@ Java_com_hook_highres_NativeHelper_findAndHookCVar(JNIEnv* env, jclass clazz) {
 }
 
 } // extern "C"
+
+#ifdef STANDALONE_EXE
+#include <cstdio>
+
+static pid_t findMainGamePid_standalone() {
+    DIR* proc = opendir("/proc");
+    if (!proc) return -1;
+    struct dirent* entry;
+    while ((entry = readdir(proc)) != nullptr) {
+        if (entry->d_type != DT_DIR) continue;
+        char path[256];
+        snprintf(path, sizeof(path), "/proc/%s/cmdline", entry->d_name);
+        FILE* f = fopen(path, "r");
+        if (!f) continue;
+        char cmdline[256] = {0};
+        if (fgets(cmdline, sizeof(cmdline), f)) {
+            fclose(f);
+            if (strcmp(cmdline, "com.tencent.tmgp.gnyx") == 0) {
+                pid_t pid = atoi(entry->d_name);
+                closedir(proc);
+                return pid;
+            }
+        } else {
+            fclose(f);
+        }
+    }
+    closedir(proc);
+    return -1;
+}
+
+static ssize_t readRemote_standalone(pid_t pid, void* remoteAddr, void* localBuf, size_t len) {
+    struct iovec local = {localBuf, len};
+    struct iovec remote = {remoteAddr, len};
+    return process_vm_readv(pid, &local, 1, &remote, 1, 0);
+}
+
+static ssize_t writeRemote_standalone(pid_t pid, void* remoteAddr, void* localBuf, size_t len) {
+    struct iovec local = {localBuf, len};
+    struct iovec remote = {remoteAddr, len};
+    return process_vm_writev(pid, &local, 1, &remote, 1, 0);
+}
+
+int main(int argc, char* argv[]) {
+    int level = 4;
+    if (argc > 1) level = atoi(argv[1]);
+    printf("[set_render_level] Target level: %d\n", level);
+
+    pid_t mainPid = findMainGamePid_standalone();
+    if (mainPid <= 0) {
+        printf("[set_render_level] ERROR: Main game process not found\n");
+        return 1;
+    }
+    printf("[set_render_level] Found main game process: %d\n", mainPid);
+
+    char mapsPath[64];
+    snprintf(mapsPath, sizeof(mapsPath), "/proc/%d/maps", mainPid);
+    FILE* maps = fopen(mapsPath, "r");
+    if (!maps) {
+        printf("[set_render_level] ERROR: Cannot open maps\n");
+        return 1;
+    }
+
+    const char* targetStr = "fp.DefaultRenderLevel";
+    size_t targetLen = strlen(targetStr);
+    char line[1024];
+    uintptr_t textStart = 0, textEnd = 0;
+    uintptr_t dataStart = 0, dataEnd = 0;
+    uintptr_t rwStart = 0, rwEnd = 0;
+
+    while (fgets(line, sizeof(line), maps)) {
+        if (!strstr(line, "libUE4.so")) continue;
+        uintptr_t start, end;
+        char perms[8];
+        sscanf(line, "%lx-%lx %s", &start, &end, perms);
+        if (strstr(perms, "r-x")) {
+            if (!textStart) { textStart = start; textEnd = end; }
+        } else if (strstr(perms, "rw-")) {
+            if (!rwStart) { rwStart = start; rwEnd = end; }
+            else { dataStart = start; dataEnd = end; }
+        }
+    }
+    fclose(maps);
+
+    printf("[set_render_level] text=%lx-%lx rw=%lx-%lx data=%lx-%lx\n",
+           textStart, textEnd, rwStart, rwEnd, dataStart, dataEnd);
+
+    if (!textStart || !rwStart) {
+        printf("[set_render_level] ERROR: libUE4.so segments not found\n");
+        return 1;
+    }
+
+    uintptr_t stringAddr = 0;
+    const size_t SCAN_CHUNK = 65536;
+    unsigned char* buf = (unsigned char*)malloc(SCAN_CHUNK);
+
+    for (uintptr_t addr = textStart; addr < textEnd; addr += SCAN_CHUNK - targetLen) {
+        size_t toRead = SCAN_CHUNK;
+        if (addr + toRead > textEnd) toRead = textEnd - addr;
+        ssize_t nread = readRemote_standalone(mainPid, (void*)addr, buf, toRead);
+        if (nread <= 0) continue;
+        for (size_t i = 0; i + targetLen <= (size_t)nread; i++) {
+            if (memcmp(buf + i, targetStr, targetLen) == 0) {
+                stringAddr = addr + i;
+                printf("[set_render_level] Found CVar name string at: %lx\n", stringAddr);
+                break;
+            }
+        }
+        if (stringAddr) break;
+    }
+
+    if (!stringAddr) {
+        printf("[set_render_level] ERROR: CVar name string not found\n");
+        free(buf);
+        return 1;
+    }
+
+    uintptr_t structAddr = 0;
+    uintptr_t allRegions[][2] = {{rwStart, rwEnd}, {dataStart, dataEnd}};
+
+    const size_t SCAN_BUF_SIZE = 65536;
+    unsigned char* scanBuf = (unsigned char*)malloc(SCAN_BUF_SIZE);
+
+    for (int r = 0; r < 2; r++) {
+        uintptr_t rStart = allRegions[r][0];
+        uintptr_t rEnd = allRegions[r][1];
+        if (!rStart) continue;
+        for (uintptr_t cs = rStart; cs < rEnd; cs += SCAN_BUF_SIZE - 8) {
+            size_t toRead = SCAN_BUF_SIZE;
+            if (cs + toRead > rEnd) toRead = rEnd - cs;
+            ssize_t nread = readRemote_standalone(mainPid, (void*)cs, scanBuf, toRead);
+            if (nread <= 0) continue;
+            for (size_t i = 0; i + 8 <= (size_t)nread; i += 8) {
+                uintptr_t ptrVal;
+                memcpy(&ptrVal, scanBuf + i, 8);
+                if (ptrVal == stringAddr) {
+                    uintptr_t candidate = cs + i - 8;
+                    uintptr_t testValPtr = 0;
+                    ssize_t vr = readRemote_standalone(mainPid, (void*)(candidate + 16), &testValPtr, 8);
+                    if (vr == 8 && testValPtr > 0x1000) {
+                        structAddr = candidate;
+                        printf("[set_render_level] Found FAutoConsoleVariableRef at: %lx, valuePtr=%lx\n", structAddr, testValPtr);
+                        break;
+                    }
+                }
+            }
+            if (structAddr) break;
+        }
+        if (structAddr) break;
+    }
+    free(scanBuf);
+
+    if (!structAddr) {
+        printf("[set_render_level] ERROR: CVar structure not found\n");
+        free(buf);
+        return 1;
+    }
+
+    uintptr_t valuePtr = 0;
+    ssize_t nread = readRemote_standalone(mainPid, (void*)(structAddr + 16), &valuePtr, 8);
+    if (nread != 8 || valuePtr == 0) {
+        printf("[set_render_level] ERROR: Cannot read value pointer\n");
+        free(buf);
+        return 1;
+    }
+
+    printf("[set_render_level] Value pointer: %lx\n", valuePtr);
+
+    int32_t newLevel = (int32_t)level;
+    ssize_t nwritten = writeRemote_standalone(mainPid, (void*)valuePtr, &newLevel, sizeof(newLevel));
+    if (nwritten != sizeof(newLevel)) {
+        printf("[set_render_level] ERROR: Failed to write value\n");
+        free(buf);
+        return 1;
+    }
+
+    int32_t verifyVal = 0;
+    readRemote_standalone(mainPid, (void*)valuePtr, &verifyVal, 4);
+    printf("[set_render_level] SUCCESS! CVar fp.DefaultRenderLevel = %d (was %d)\n", verifyVal, level);
+
+    free(buf);
+    return 0;
+}
+#endif
