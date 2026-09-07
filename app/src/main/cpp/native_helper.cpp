@@ -554,6 +554,37 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // Search-ptr mode: search for an 8-byte pointer value across ALL segments
+    // Usage: set_render_level search-ptr <hex_pointer_value>
+    if (argc >= 3 && strcmp(argv[1], "search-ptr") == 0) {
+        uintptr_t targetPtr = strtoul(argv[2], nullptr, 16);
+        printf("[set_render_level] Searching for pointer value: %lx\n", targetPtr);
+        const size_t SCAN_CHUNK = 65536;
+        unsigned char* buf = (unsigned char*)malloc(SCAN_CHUNK);
+        int found = 0;
+        for (int s = 0; s < segCount; s++) {
+            uintptr_t segS = segStarts[s], segE = segEnds[s];
+            for (uintptr_t addr = segS; addr < segE; addr += SCAN_CHUNK - 8) {
+                size_t toRead = SCAN_CHUNK;
+                if (addr + toRead > segE) toRead = segE - addr;
+                ssize_t nread = readRemote_standalone(mainPid, (void*)addr, buf, toRead);
+                if (nread <= 0) continue;
+                for (size_t i = 0; i + 8 <= (size_t)nread; i += 8) {
+                    uintptr_t ptrVal;
+                    memcpy(&ptrVal, buf + i, 8);
+                    if (ptrVal == targetPtr) {
+                        printf("[set_render_level] Found pointer at %lx (%s) -> %lx\n", addr + i, segNames[s], targetPtr);
+                        found++;
+                        if (found >= 20) { printf("[set_render_level] Too many matches, stopping\n"); free(buf); return 0; }
+                    }
+                }
+            }
+        }
+        printf("[set_render_level] Total matches: %d\n", found);
+        free(buf);
+        return 0;
+    }
+
     // Normal mode: modify CVar
     uintptr_t stringAddr = 0;
     const size_t SCAN_CHUNK = 65536;
