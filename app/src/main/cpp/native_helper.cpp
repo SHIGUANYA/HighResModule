@@ -3,67 +3,58 @@
 #include <dlfcn.h>
 #include <cstring>
 #include <string>
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
+#include <sys/uio.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #define LOG_TAG "HighResNative"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
-// UE4 CVar registration structure (simplified)
-// FAutoConsoleVariableRef stores a pointer to the actual CVar value
-struct FAutoConsoleVariableRef {
-    void* next;           // linked list next
-    const char* name;     // CVar name
-    void* valuePtr;       // pointer to the actual value
-    const char* help;     // help text
-    int32_t flags;        // flags
-};
+static pid_t findMainGamePid() {
+    DIR* proc = opendir("/proc");
+    if (!proc) return -1;
 
-// Global linked list head of all registered CVars (from libUE4.so)
-// We find this by scanning for the pattern after libUE4.so is loaded
-static FAutoConsoleVariableRef* g_cvarHead = nullptr;
+    struct dirent* entry;
+    while ((entry = readdir(proc)) != nullptr) {
+        if (entry->d_type != DT_DIR) continue;
 
-// Store the render level CVar pointer
-static int32_t* g_renderLevelCVar = nullptr;
-static int32_t* g_maxSupportRenderLevelCVar = nullptr;
+        char path[256];
+        snprintf(path, sizeof(path), "/proc/%s/cmdline", entry->d_name);
 
-// Find all CVars by scanning libUE4.so memory
-static void findAllCVars() {
-    // Get the base address of libUE4.so
-    void* handle = dlopen("libUE4.so", RTLD_NOLOAD);
-    if (!handle) {
-        LOGE("Failed to dlopen libUE4.so: %s", dlerror());
-        return;
+        FILE* f = fopen(path, "r");
+        if (!f) continue;
+
+        char cmdline[256] = {0};
+        if (fgets(cmdline, sizeof(cmdline), f)) {
+            fclose(f);
+            if (strcmp(cmdline, "com.tencent.tmgp.gnyx") == 0) {
+                pid_t pid = atoi(entry->d_name);
+                closedir(proc);
+                LOGI("Found main game process: %d", pid);
+                return pid;
+            }
+        } else {
+            fclose(f);
+        }
     }
-
-    // Get the size of the loaded library
-    Dl_info info;
-    if (dladdr((void*)findAllCVars, &info)) {
-        LOGI("libUE4.so base: %p", info.dli_fbase);
-    }
-
-    // We need to find the CVar linked list head
-    // In UE4, CVars are registered via FAutoConsoleVariableRef constructor
-    // which adds to a global linked list
-    // The head is typically at a known offset from the library base
-
-    // For now, we'll try a different approach: use UE4's console exec
-    // to set the CVar value
+    closedir(proc);
+    return -1;
 }
 
-// Try to execute a console command via UE4's Exec function
-static bool execConsoleCommand(const char* command) {
-    // Find the GEngine global
-    void* handle = dlopen("libUE4.so", RTLD_NOLOAD);
-    if (!handle) return false;
+static ssize_t readRemote(pid_t pid, void* remoteAddr, void* localBuf, size_t len) {
+    struct iovec local = {localBuf, len};
+    struct iovec remote = {remoteAddr, len};
+    return process_vm_readv(pid, &local, 1, &remote, 1, 0);
+}
 
-    // Try to find Exec function - this is a heuristic approach
-    // In UE4, console commands are executed via: GEngine->Exec(...)
-
-    // Alternative: use the CVar system directly
-    // Find IConsoleManager::Get().FindConsoleVariable()
-
-    // For now, return false - we'll use the Java approach
-    return false;
+static ssize_t writeRemote(pid_t pid, void* remoteAddr, void* localBuf, size_t len) {
+    struct iovec local = {localBuf, len};
+    struct iovec remote = {remoteAddr, len};
+    return process_vm_writev(pid, &local, 1, &remote, 1, 0);
 }
 
 extern "C" {
@@ -72,149 +63,168 @@ JNIEXPORT jboolean JNICALL
 Java_com_hook_highres_NativeHelper_setRenderLevel(JNIEnv* env, jclass clazz, jint level) {
     LOGI("setRenderLevel called with level: %d", level);
 
-    // Find libUE4.so
-    void* handle = dlopen("libUE4.so", RTLD_NOLOAD);
-    if (!handle) {
-        LOGE("libUE4.so not loaded yet");
+    pid_t mainPid = findMainGamePid();
+    if (mainPid <= 0) {
+        LOGE("Main game process not found");
         return JNI_FALSE;
     }
 
-    // Get library info
-    Dl_info info;
-    if (!dladdr((void*)handle, &info)) {
-        LOGE("Failed to get libUE4.so info");
+    char mapsPath[64];
+    snprintf(mapsPath, sizeof(mapsPath), "/proc/%d/maps", mainPid);
+
+    FILE* maps = fopen(mapsPath, "r");
+    if (!maps) {
+        LOGE("Failed to open maps for pid %d", mainPid);
         return JNI_FALSE;
     }
 
-    uintptr_t base = (uintptr_t)info.dli_fbase;
-    LOGI("libUE4.so base address: %p", (void*)base);
-
-    // Method 1: Try to find and modify the CVar by scanning memory
-    // The CVar "fp.DefaultRenderLevel" is registered as a int32_t
-    // We scan for the string pattern in the library
-
-    // First, find the string "fp.DefaultRenderLevel" in the library
     const char* targetStr = "fp.DefaultRenderLevel";
     size_t targetLen = strlen(targetStr);
 
-    // Read the library memory map to find executable segments
-    FILE* maps = fopen("/proc/self/maps", "r");
-    if (!maps) {
-        LOGE("Failed to open /proc/self/maps");
-        return JNI_FALSE;
-    }
+    char line[1024];
+    uintptr_t textStart = 0, textEnd = 0;
+    uintptr_t dataStart = 0, dataEnd = 0;
+    uintptr_t rwStart = 0, rwEnd = 0;
 
-    char line[512];
     while (fgets(line, sizeof(line), maps)) {
-        if (strstr(line, "libUE4.so") && strstr(line, "r-xp")) {
-            // This is an executable segment of libUE4.so
-            uintptr_t start, end;
-            sscanf(line, "%lx-%lx", &start, &end);
+        if (!strstr(line, "libUE4.so")) continue;
 
-            LOGI("Scanning segment: %lx-%lx", start, end);
+        uintptr_t start, end;
+        char perms[8];
+        sscanf(line, "%lx-%lx %s", &start, &end, perms);
 
-            // Scan for the string pattern
-            for (uintptr_t addr = start; addr < end - targetLen; addr++) {
-                if (memcmp((void*)addr, targetStr, targetLen) == 0) {
-                    LOGI("Found string at: %lx", addr);
-
-                    // Found the string. The CVar value pointer should be nearby.
-                    // In FAutoConsoleVariableRef, the structure is:
-                    // {next, name, valuePtr, help, flags}
-                    // The name points to this string, so valuePtr is at name+8 (on 64-bit)
-
-                    // Actually, we need to find the FAutoConsoleVariableRef structure
-                    // that references this string. Let's scan for pointers to this address.
-
-                    // For simplicity, let's try a different approach:
-                    // The CVar value is typically within a few hundred bytes of the string
-                    // in the .data section. We'll scan the nearby memory.
-
-                    // Actually, the best approach is to use UE4's CVar system directly
-                    // via the IConsoleManager interface. But that requires finding
-                    // the function pointers.
-
-                    // For now, let's try to modify the value by scanning for
-                    // the integer pattern. The default render level is 3.
-                    // We want to change it to 4.
-
-                    // Scan nearby data sections for the value
-                    FILE* maps2 = fopen("/proc/self/maps", "r");
-                    if (maps2) {
-                        char line2[512];
-                        while (fgets(line2, sizeof(line2), maps2)) {
-                            if (strstr(line2, "libUE4.so") && strstr(line2, "rw-p")) {
-                                uintptr_t dstart, dend;
-                                sscanf(line2, "%lx-%lx", &dstart, &dend);
-
-                                // Scan for the integer value 3 (render level)
-                                for (uintptr_t daddr = dstart; daddr < dend - 4; daddr += 4) {
-                                    int32_t val = *(int32_t*)daddr;
-                                    if (val == 3) {
-                                        // Check if this might be the render level CVar
-                                        // by checking nearby strings or patterns
-                                        LOGI("Found potential render level CVar at: %lx (value: %d)", daddr, val);
-
-                                        // Try to modify it
-                                        // First, we need to find the actual CVar structure
-                                        // The CVar value is stored in a FAutoConsoleVariableRef
-                                        // which has a pointer to the actual int32_t
-
-                                        // For now, we'll try to directly modify the memory
-                                        // This is risky but may work
-                                        *(int32_t*)daddr = level;
-                                        LOGI("Modified value at %lx to %d", daddr, level);
-
-                                        // Verify
-                                        int32_t newVal = *(int32_t*)daddr;
-                                        LOGI("Verification: value at %lx is now %d", daddr, newVal);
-
-                                        fclose(maps2);
-                                        fclose(maps);
-                                        return JNI_TRUE;
-                                    }
-                                }
-                            }
-                        }
-                        fclose(maps2);
-                    }
-                }
-            }
+        if (strstr(perms, "r-x")) {
+            if (!textStart) { textStart = start; textEnd = end; }
+        } else if (strstr(perms, "rw-")) {
+            if (!rwStart) { rwStart = start; rwEnd = end; }
+            else { dataStart = start; dataEnd = end; }
         }
     }
     fclose(maps);
 
-    // Method 2: Try to use UE4's console command system
-    // Find GEngine and call Exec
-    LOGI("Direct memory scan failed, trying console command approach");
+    LOGI("Main process libUE4.so: text=%lx-%lx, rw=%lx-%lx, data=%lx-%lx",
+         textStart, textEnd, rwStart, rwEnd, dataStart, dataEnd);
 
-    // This is a fallback - we'll try to execute a console command
-    // via the game's own exec mechanism
+    if (!textStart || !rwStart) {
+        LOGE("Could not find libUE4.so segments in main process");
+        return JNI_FALSE;
+    }
 
-    return JNI_FALSE;
+    // Scan text segment for the CVar name string
+    uintptr_t stringAddr = 0;
+    const size_t SCAN_CHUNK = 4096;
+    unsigned char* buf = (unsigned char*)malloc(SCAN_CHUNK);
+
+    for (uintptr_t addr = textStart; addr < textEnd; addr += SCAN_CHUNK - targetLen) {
+        size_t toRead = SCAN_CHUNK;
+        if (addr + toRead > textEnd) toRead = textEnd - addr;
+
+        ssize_t nread = readRemote(mainPid, (void*)addr, buf, toRead);
+        if (nread <= 0) continue;
+
+        for (size_t i = 0; i + targetLen <= (size_t)nread; i++) {
+            if (memcmp(buf + i, targetStr, targetLen) == 0) {
+                stringAddr = addr + i;
+                LOGI("Found CVar name string at remote: %lx", stringAddr);
+                break;
+            }
+        }
+        if (stringAddr) break;
+    }
+
+    if (!stringAddr) {
+        LOGE("CVar name string not found in main process");
+        free(buf);
+        return JNI_FALSE;
+    }
+
+    // Scan all rw segments of libUE4.so in the main process for a pointer to our string
+    // FAutoConsoleVariableRef layout (64-bit):
+    // offset 0: next (pointer to next CVarRef)
+    // offset 8: name (pointer to name string) <-- this is what we search for
+    // offset 16: valuePtr (pointer to int32_t value)
+
+    uintptr_t structAddr = 0;
+    uintptr_t allRegions[][2] = {{rwStart, rwEnd}, {dataStart, dataEnd}};
+
+    const size_t SCAN_BUF_SIZE = 65536;
+    unsigned char* scanBuf = (unsigned char*)malloc(SCAN_BUF_SIZE);
+
+    for (int r = 0; r < 2; r++) {
+        uintptr_t rStart = allRegions[r][0];
+        uintptr_t rEnd = allRegions[r][1];
+        if (!rStart) continue;
+
+        LOGI("Scanning rw region %lx-%lx for string pointer", rStart, rEnd);
+
+        for (uintptr_t chunkStart = rStart; chunkStart < rEnd; chunkStart += SCAN_BUF_SIZE - 8) {
+            size_t toRead = SCAN_BUF_SIZE;
+            if (chunkStart + toRead > rEnd) toRead = rEnd - chunkStart;
+
+            ssize_t nread = readRemote(mainPid, (void*)chunkStart, scanBuf, toRead);
+            if (nread <= 0) continue;
+
+            for (size_t i = 0; i + 8 <= (size_t)nread; i += 8) {
+                uintptr_t ptrVal;
+                memcpy(&ptrVal, scanBuf + i, 8);
+
+                if (ptrVal == stringAddr) {
+                    uintptr_t candidate = chunkStart + i - 8;
+                    LOGI("Found candidate FAutoConsoleVariableRef at: %lx", candidate);
+
+                    // Verify: read the value pointer at offset 16 and check it points to valid memory
+                    uintptr_t testValPtr = 0;
+                    ssize_t vr = readRemote(mainPid, (void*)(candidate + 16), &testValPtr, 8);
+                    if (vr == 8 && testValPtr > 0x1000) {
+                        structAddr = candidate;
+                        LOGI("Confirmed FAutoConsoleVariableRef at remote: %lx, valuePtr=%lx", structAddr, testValPtr);
+                        break;
+                    }
+                }
+            }
+            if (structAddr) break;
+        }
+        if (structAddr) break;
+    }
+    free(scanBuf);
+
+    if (!structAddr) {
+        LOGE("FAutoConsoleVariableRef structure not found");
+        free(buf);
+        return JNI_FALSE;
+    }
+
+    // Read the value pointer (offset 16 from struct start)
+    uintptr_t valuePtr = 0;
+    ssize_t nread = readRemote(mainPid, (void*)(structAddr + 16), &valuePtr, 8);
+    if (nread != 8 || valuePtr == 0) {
+        LOGE("Failed to read value pointer from struct");
+        free(buf);
+        return JNI_FALSE;
+    }
+
+    LOGI("CVar value pointer at remote: %lx", valuePtr);
+
+    // Write the new value
+    int32_t newLevel = (int32_t)level;
+    ssize_t nwritten = writeRemote(mainPid, (void*)valuePtr, &newLevel, sizeof(newLevel));
+    if (nwritten != sizeof(newLevel)) {
+        LOGE("Failed to write new value");
+        free(buf);
+        return JNI_FALSE;
+    }
+
+    // Verify by reading back
+    int32_t verifyVal = 0;
+    readRemote(mainPid, (void*)valuePtr, &verifyVal, 4);
+    LOGI("Verified: CVar fp.DefaultRenderLevel = %d in main process (PID %d)", verifyVal, mainPid);
+
+    free(buf);
+    return JNI_TRUE;
 }
 
 JNIEXPORT jboolean JNICALL
 Java_com_hook_highres_NativeHelper_findAndHookCVar(JNIEnv* env, jclass clazz) {
-    LOGI("findAndHookCVar called");
-
-    // This method tries to find the CVar by using UE4's internal functions
-    // We need to find IConsoleManager::Get().FindConsoleVariable()
-
-    void* handle = dlopen("libUE4.so", RTLD_NOLOAD);
-    if (!handle) {
-        LOGE("libUE4.so not loaded");
-        return JNI_FALSE;
-    }
-
-    // Try to find the IConsoleManager singleton
-    // In UE4, this is typically: IConsoleManager::Get()
-    // which returns a static instance
-
-    // Find the Get() function by looking for known symbols
-    // This is architecture-specific and may not work on all versions
-
-    // For now, return false and let Java handle it
     return JNI_FALSE;
 }
 
