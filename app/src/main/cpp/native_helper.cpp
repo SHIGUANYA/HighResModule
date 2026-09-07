@@ -301,49 +301,48 @@ int main(int argc, char* argv[]) {
     const char* targetStr = "fp.DefaultRenderLevel";
     size_t targetLen = strlen(targetStr);
     char line[1024];
-    uintptr_t textStart = 0, textEnd = 0;
-    uintptr_t dataStart = 0, dataEnd = 0;
-    uintptr_t rwStart = 0, rwEnd = 0;
+
+    // Collect ALL readable segments of libUE4.so
+    #define MAX_SEGS 128
+    uintptr_t segStarts[MAX_SEGS], segEnds[MAX_SEGS];
+    int segCount = 0;
 
     while (fgets(line, sizeof(line), maps)) {
         if (!strstr(line, "libUE4.so")) continue;
         uintptr_t start, end;
         char perms[8];
         sscanf(line, "%lx-%lx %s", &start, &end, perms);
-        if (strstr(perms, "r-x")) {
-            if (!textStart) { textStart = start; textEnd = end; }
-        } else if (strstr(perms, "rw-")) {
-            if (!rwStart) { rwStart = start; rwEnd = end; }
-            else { dataStart = start; dataEnd = end; }
+        if (perms[0] == 'r' && segCount < MAX_SEGS) {
+            segStarts[segCount] = start;
+            segEnds[segCount] = end;
+            segCount++;
         }
     }
     fclose(maps);
 
-    printf("[set_render_level] text=%lx-%lx rw=%lx-%lx data=%lx-%lx\n",
-           textStart, textEnd, rwStart, rwEnd, dataStart, dataEnd);
+    printf("[set_render_level] Found %d readable segments\n", segCount);
 
-    if (!textStart || !rwStart) {
-        printf("[set_render_level] ERROR: libUE4.so segments not found\n");
-        return 1;
-    }
-
+    // Scan ALL segments for the CVar name string
     uintptr_t stringAddr = 0;
     const size_t SCAN_CHUNK = 65536;
     unsigned char* buf = (unsigned char*)malloc(SCAN_CHUNK);
 
-    for (uintptr_t addr = textStart; addr < textEnd; addr += SCAN_CHUNK - targetLen) {
-        size_t toRead = SCAN_CHUNK;
-        if (addr + toRead > textEnd) toRead = textEnd - addr;
-        ssize_t nread = readRemote_standalone(mainPid, (void*)addr, buf, toRead);
-        if (nread <= 0) continue;
-        for (size_t i = 0; i + targetLen <= (size_t)nread; i++) {
-            if (memcmp(buf + i, targetStr, targetLen) == 0) {
-                stringAddr = addr + i;
-                printf("[set_render_level] Found CVar name string at: %lx\n", stringAddr);
-                break;
+    for (int s = 0; s < segCount && !stringAddr; s++) {
+        uintptr_t segS = segStarts[s], segE = segEnds[s];
+        printf("[set_render_level] Scanning segment %lx-%lx (%lu bytes)\n", segS, segE, segE - segS);
+        for (uintptr_t addr = segS; addr < segE; addr += SCAN_CHUNK - targetLen) {
+            size_t toRead = SCAN_CHUNK;
+            if (addr + toRead > segE) toRead = segE - addr;
+            ssize_t nread = readRemote_standalone(mainPid, (void*)addr, buf, toRead);
+            if (nread <= 0) continue;
+            for (size_t i = 0; i + targetLen <= (size_t)nread; i++) {
+                if (memcmp(buf + i, targetStr, targetLen) == 0) {
+                    stringAddr = addr + i;
+                    printf("[set_render_level] Found CVar name string at: %lx\n", stringAddr);
+                    break;
+                }
             }
         }
-        if (stringAddr) break;
     }
 
     if (!stringAddr) {
@@ -353,15 +352,17 @@ int main(int argc, char* argv[]) {
     }
 
     uintptr_t structAddr = 0;
-    uintptr_t allRegions[][2] = {{rwStart, rwEnd}, {dataStart, dataEnd}};
 
     const size_t SCAN_BUF_SIZE = 65536;
     unsigned char* scanBuf = (unsigned char*)malloc(SCAN_BUF_SIZE);
 
-    for (int r = 0; r < 2; r++) {
-        uintptr_t rStart = allRegions[r][0];
-        uintptr_t rEnd = allRegions[r][1];
-        if (!rStart) continue;
+    for (int s = 0; s < segCount && !structAddr; s++) {
+        uintptr_t rStart = segStarts[s], rEnd = segEnds[s];
+        // Only scan rw segments for pointers (not executable ones)
+        char perms[8] = {0};
+        // Re-read perms from maps... simplified: scan all non-executable segments
+        // Actually just scan all segments - safe because we're reading pointers
+        printf("[set_render_level] Scanning for struct in segment %lx-%lx\n", rStart, rEnd);
         for (uintptr_t cs = rStart; cs < rEnd; cs += SCAN_BUF_SIZE - 8) {
             size_t toRead = SCAN_BUF_SIZE;
             if (cs + toRead > rEnd) toRead = rEnd - cs;
@@ -381,9 +382,7 @@ int main(int argc, char* argv[]) {
                     }
                 }
             }
-            if (structAddr) break;
         }
-        if (structAddr) break;
     }
     free(scanBuf);
 
