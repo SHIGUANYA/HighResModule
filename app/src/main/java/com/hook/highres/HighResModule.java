@@ -5,7 +5,6 @@ import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
-import java.io.*;
 
 public class HighResModule implements IXposedHookLoadPackage {
     private static final String TAG = "HighResModule";
@@ -18,41 +17,23 @@ public class HighResModule implements IXposedHookLoadPackage {
         XposedBridge.log("HighResModule: loaded in " + lpparam.packageName);
 
         new Thread(() -> {
-            try {
-                Thread.sleep(5000);
-                extractAndRun();
-            } catch (Throwable t) {
-                Log.w(TAG, "Thread failed: " + t.getMessage());
+            for (int i = 0; i < 15; i++) {
+                try {
+                    Thread.sleep(2000);
+                    Log.i(TAG, "Attempt " + (i + 1) + "/15 to set render level");
+                    boolean ok = NativeHelper.setRenderLevel(4);
+                    if (ok) {
+                        Log.i(TAG, "SUCCESS! Render level set to 4 in main process");
+                        XposedBridge.log("HighResModule: render level 4 set in main process!");
+                        return;
+                    }
+                    Log.i(TAG, "Attempt " + (i + 1) + " returned false");
+                } catch (Throwable t) {
+                    Log.w(TAG, "Attempt " + (i + 1) + " failed: " + t.getClass().getSimpleName() + " " + t.getMessage());
+                }
             }
+            Log.w(TAG, "All 15 attempts failed");
+            XposedBridge.log("HighResModule: all attempts failed");
         }, "HighResThread").start();
-    }
-
-    private void extractAndRun() {
-        String exePath = "/data/local/tmp/set_render_level";
-
-        try {
-            Runtime.getRuntime().exec(new String[]{"chmod", "755", exePath}).waitFor();
-            runExe(exePath);
-        } catch (Throwable t) {
-            Log.w(TAG, "Standalone exe not found or failed: " + t.getMessage());
-        }
-    }
-
-    private void runExe(String exePath) {
-        try {
-            Process proc = Runtime.getRuntime().exec(new String[]{"su", "-c", exePath + " 4"});
-            BufferedReader stdout = new BufferedReader(new InputStreamReader(proc.getInputStream()));
-            BufferedReader stderr = new BufferedReader(new InputStreamReader(proc.getErrorStream()));
-            String line;
-            while ((line = stdout.readLine()) != null) {
-                Log.i(TAG, "EXE: " + line);
-                XposedBridge.log("HighResModule: " + line);
-            }
-            while ((line = stderr.readLine()) != null) Log.w(TAG, "EXE_ERR: " + line);
-            int exitCode = proc.waitFor();
-            Log.i(TAG, "Standalone exe exited with code: " + exitCode);
-        } catch (Throwable t) {
-            Log.w(TAG, "Failed to run exe: " + t.getMessage());
-        }
     }
 }
