@@ -492,6 +492,23 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // Write-byte mode: write a single byte to a remote address
+    // Usage: set_render_level write-byte <hex_address> <byte_value>
+    if (argc >= 4 && strcmp(argv[1], "write-byte") == 0) {
+        uintptr_t addr = strtoul(argv[2], nullptr, 16);
+        unsigned char value = (unsigned char)atoi(argv[3]);
+        printf("[set_render_level] Writing byte 0x%02x ('%c') to %lx\n", value, (value >= 32 && value < 127) ? value : '.', addr);
+        ssize_t nwritten = writeRemote_standalone(mainPid, (void*)addr, &value, 1);
+        if (nwritten != 1) {
+            printf("[set_render_level] ERROR: Failed to write\n");
+            return 1;
+        }
+        unsigned char verify = 0;
+        readRemote_standalone(mainPid, (void*)addr, &verify, 1);
+        printf("[set_render_level] Verified: byte at %lx = 0x%02x ('%c')\n", addr, verify, (verify >= 32 && verify < 127) ? verify : '.');
+        return 0;
+    }
+
     // Float pattern search: search for consecutive float values
     // Usage: set_render_level search-float <val1> <val2> ...
     if (argc > 2 && strcmp(argv[1], "search-float") == 0) {
