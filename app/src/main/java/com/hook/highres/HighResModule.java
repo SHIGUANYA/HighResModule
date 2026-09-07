@@ -6,6 +6,7 @@ import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedBridge;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 import de.robv.android.xposed.callbacks.XC_LoadPackage.LoadPackageParam;
+import java.lang.reflect.Method;
 
 public class HighResModule implements IXposedHookLoadPackage {
     private static final String TAG = "HighResModule";
@@ -17,28 +18,47 @@ public class HighResModule implements IXposedHookLoadPackage {
         Log.i(TAG, "=== Loaded in " + lpparam.packageName + " ===");
         XposedBridge.log("HighResModule: loaded in " + lpparam.packageName);
 
-        hookSystemLoadLibrary(lpparam);
+        hookViaReflection();
     }
 
-    private void hookSystemLoadLibrary(LoadPackageParam lpparam) {
+    private void hookViaReflection() {
         try {
-            java.lang.reflect.Method loadLib = System.class.getDeclaredMethod("loadLibrary", String.class);
-            Object unhook = XposedBridge.hookMethod(loadLib, new XC_MethodHook() {
+            Class<?> xbClass = XposedBridge.class;
+            Method hookMethod = null;
+            for (Method m : xbClass.getDeclaredMethods()) {
+                if ("hookMethod".equals(m.getName()) && m.getParameterCount() == 2) {
+                    hookMethod = m;
+                    break;
+                }
+            }
+            if (hookMethod == null) {
+                Log.w(TAG, "hookMethod not found in XposedBridge");
+                return;
+            }
+            hookMethod.setAccessible(true);
+
+            Method loadLibMethod = System.class.getDeclaredMethod("loadLibrary", String.class);
+
+            final Method finalHook = hookMethod;
+
+            XC_MethodHook callback = new XC_MethodHook() {
                 @Override
                 protected void afterHookedMethod(MethodHookParam param) throws Throwable {
                     String libName = (String) param.args[0];
                     Log.i(TAG, "System.loadLibrary: " + libName);
                     if ("UE4".equals(libName) || "gn_game".equals(libName)) {
                         Log.i(TAG, "Native lib loaded: " + libName);
-                        XposedBridge.log("HighResModule: native lib loaded: " + libName);
                         Thread.sleep(3000);
                         trySetRenderLevel();
                     }
                 }
-            });
-            Log.i(TAG, "Hooked System.loadLibrary");
+            };
+
+            finalHook.invoke(null, loadLibMethod, callback);
+            Log.i(TAG, "Hooked via reflection OK");
         } catch (Throwable t) {
-            Log.w(TAG, "Failed to hook System.loadLibrary: " + t.getMessage());
+            Log.w(TAG, "Reflection hook failed: " + t.getClass().getName() + " - " + t.getMessage());
+            XposedBridge.log("HighResModule: hook failed - " + t.getMessage());
         }
     }
 
