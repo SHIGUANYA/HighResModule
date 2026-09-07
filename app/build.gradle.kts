@@ -14,6 +14,13 @@ android {
         versionCode = 1
         versionName = "1.0"
         ndk { abiFilters += "arm64-v8a" }
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+                arguments += "-DANDROID_STL=c++_shared"
+            }
+        }
     }
 
     buildTypes {
@@ -28,15 +35,22 @@ android {
         targetCompatibility = JavaVersion.VERSION_1_8
     }
     kotlinOptions { jvmTarget = "1.8" }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
 }
 
 repositories {
     google()
     mavenCentral()
-    maven { url = uri("https://jitpack.io") }  // ★ 必须：JitPack 托管 XposedBridge
 }
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
-    compileOnly("com.github.rovo89:XposedBridge:82")  // ★ 关键：从 JitPack 拉取 XposedBridge (v82 存在)
+    // Xposed API is bundled locally as stubs (no external dependency needed)
+    // The actual XposedBridge is provided by LSPosed at runtime
 }
