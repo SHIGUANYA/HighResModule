@@ -303,7 +303,7 @@ int main(int argc, char* argv[]) {
     char line[1024];
 
     // Collect ALL readable segments from the process (not just libUE4.so)
-    #define MAX_SEGS 512
+    #define MAX_SEGS 2048
     uintptr_t segStarts[MAX_SEGS], segEnds[MAX_SEGS];
     char segNames[MAX_SEGS][128];
     int segCount = 0;
@@ -367,6 +367,98 @@ int main(int argc, char* argv[]) {
                         found++;
                         if (found >= 50) { printf("[set_render_level] Too many matches, stopping\n"); free(buf); return 0; }
                         i += patLen - 1;
+                    }
+                }
+            }
+        }
+        printf("[set_render_level] Total matches: %d\n", found);
+        free(buf);
+        return 0;
+    }
+
+    // Integer pattern search: search for consecutive int32 values
+    // Usage: set_render_level search-int <val1> <val2> [val3] ...
+    if (argc > 2 && strcmp(argv[1], "search-int") == 0) {
+        int values[16];
+        int valCount = argc - 2;
+        if (valCount > 16) valCount = 16;
+        for (int i = 0; i < valCount; i++) values[i] = atoi(argv[i + 2]);
+        printf("[set_render_level] Searching for int32 pattern: ");
+        for (int i = 0; i < valCount; i++) printf("%d ", values[i]);
+        printf("\n");
+
+        // Only scan rw- segments (writable, non-executable)
+        const size_t SCAN_CHUNK = 65536;
+        unsigned char* buf = (unsigned char*)malloc(SCAN_CHUNK);
+        int found = 0;
+        for (int s = 0; s < segCount; s++) {
+            // Re-read perms from maps for this segment
+            // For now, scan all segments but filter by checking if it's likely rw
+            uintptr_t segS = segStarts[s], segE = segEnds[s];
+            size_t segSize = segE - segS;
+            // Skip very small segments
+            if (segSize < (size_t)(valCount * 4)) continue;
+            for (uintptr_t addr = segS; addr < segE; addr += SCAN_CHUNK - valCount * 4) {
+                size_t toRead = SCAN_CHUNK;
+                if (addr + toRead > segE) toRead = segE - addr;
+                ssize_t nread = readRemote_standalone(mainPid, (void*)addr, buf, toRead);
+                if (nread <= 0) continue;
+                for (size_t i = 0; i + valCount * 4 <= (size_t)nread; i += 4) {
+                    int32_t* vals = (int32_t*)(buf + i);
+                    bool match = true;
+                    for (int v = 0; v < valCount; v++) {
+                        if (vals[v] != values[v]) { match = false; break; }
+                    }
+                    if (match) {
+                        printf("[set_render_level] Found int pattern at %lx (%s): ", addr + i, segNames[s]);
+                        for (int v = 0; v < valCount; v++) printf("[%d]=%d ", v, vals[v]);
+                        printf("\n");
+                        found++;
+                        if (found >= 20) { printf("[set_render_level] Too many matches, stopping\n"); free(buf); return 0; }
+                    }
+                }
+            }
+        }
+        printf("[set_render_level] Total matches: %d\n", found);
+        free(buf);
+        return 0;
+    }
+
+    // Float pattern search: search for consecutive float values
+    // Usage: set_render_level search-float <val1> <val2> ...
+    if (argc > 2 && strcmp(argv[1], "search-float") == 0) {
+        float values[16];
+        int valCount = argc - 2;
+        if (valCount > 16) valCount = 16;
+        for (int i = 0; i < valCount; i++) values[i] = (float)atof(argv[i + 2]);
+        printf("[set_render_level] Searching for float pattern: ");
+        for (int i = 0; i < valCount; i++) printf("%.6f ", values[i]);
+        printf("\n");
+
+        const size_t SCAN_CHUNK = 65536;
+        unsigned char* buf = (unsigned char*)malloc(SCAN_CHUNK);
+        int found = 0;
+        for (int s = 0; s < segCount; s++) {
+            uintptr_t segS = segStarts[s], segE = segEnds[s];
+            size_t segSize = segE - segS;
+            if (segSize < (size_t)(valCount * 4)) continue;
+            for (uintptr_t addr = segS; addr < segE; addr += SCAN_CHUNK - valCount * 4) {
+                size_t toRead = SCAN_CHUNK;
+                if (addr + toRead > segE) toRead = segE - addr;
+                ssize_t nread = readRemote_standalone(mainPid, (void*)addr, buf, toRead);
+                if (nread <= 0) continue;
+                for (size_t i = 0; i + valCount * 4 <= (size_t)nread; i += 4) {
+                    float* vals = (float*)(buf + i);
+                    bool match = true;
+                    for (int v = 0; v < valCount; v++) {
+                        if (vals[v] != values[v]) { match = false; break; }
+                    }
+                    if (match) {
+                        printf("[set_render_level] Found float pattern at %lx (%s): ", addr + i, segNames[s]);
+                        for (int v = 0; v < valCount; v++) printf("[%d]=%.6f ", v, vals[v]);
+                        printf("\n");
+                        found++;
+                        if (found >= 20) { printf("[set_render_level] Too many matches, stopping\n"); free(buf); return 0; }
                     }
                 }
             }
