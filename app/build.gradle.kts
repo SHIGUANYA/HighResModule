@@ -1,6 +1,5 @@
 plugins {
     id("com.android.application") version "8.2.0"
-    id("org.jetbrains.kotlin.android") version "1.9.0"
 }
 
 android {
@@ -18,7 +17,6 @@ android {
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++17"
-                arguments += "-DANDROID_STL=c++_shared"
             }
         }
     }
@@ -34,7 +32,6 @@ android {
         sourceCompatibility = JavaVersion.VERSION_1_8
         targetCompatibility = JavaVersion.VERSION_1_8
     }
-    kotlinOptions { jvmTarget = "1.8" }
 
     externalNativeBuild {
         cmake {
@@ -50,6 +47,5 @@ repositories {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
     compileOnly(files("libs/xposed-api.jar"))
 }
