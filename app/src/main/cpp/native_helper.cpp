@@ -442,6 +442,56 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // Dump mode: read and print a region around a given address
+    // Usage: set_render_level dump <hex_address> [size_bytes]
+    if (argc > 2 && strcmp(argv[1], "dump") == 0) {
+        uintptr_t addr = strtoul(argv[2], nullptr, 16);
+        size_t dumpSize = 512;
+        if (argc > 3) dumpSize = atoi(argv[3]);
+        if (dumpSize > 4096) dumpSize = 4096;
+        
+        unsigned char* buf = (unsigned char*)malloc(dumpSize);
+        ssize_t nread = readRemote_standalone(mainPid, (void*)addr, buf, dumpSize);
+        if (nread <= 0) {
+            printf("[set_render_level] ERROR: Cannot read at %lx\n", addr);
+            free(buf);
+            return 1;
+        }
+        
+        printf("[set_render_level] Dump at %lx (%zd bytes read):\n", addr, nread);
+        for (size_t i = 0; i < (size_t)nread; i += 16) {
+            printf("[set_render_level] %08lx: ", (unsigned long)(addr + i));
+            for (size_t j = 0; j < 16 && i + j < (size_t)nread; j++)
+                printf("%02x ", buf[i + j]);
+            for (size_t j = nread - i; j < 16; j++) printf("   ");
+            printf(" |");
+            for (size_t j = 0; j < 16 && i + j < (size_t)nread; j++) {
+                unsigned char c = buf[i + j];
+                printf("%c", (c >= 32 && c < 127) ? c : '.');
+            }
+            printf("|\n");
+        }
+        free(buf);
+        return 0;
+    }
+
+    // Write-int mode: write an int32 to a remote address
+    // Usage: set_render_level write-int <hex_address> <value>
+    if (argc > 4 && strcmp(argv[1], "write-int") == 0) {
+        uintptr_t addr = strtoul(argv[2], nullptr, 16);
+        int32_t value = atoi(argv[3]);
+        printf("[set_render_level] Writing int32 %d to %lx\n", value, addr);
+        ssize_t nwritten = writeRemote_standalone(mainPid, (void*)addr, &value, sizeof(value));
+        if (nwritten != sizeof(value)) {
+            printf("[set_render_level] ERROR: Failed to write\n");
+            return 1;
+        }
+        int32_t verify = 0;
+        readRemote_standalone(mainPid, (void*)addr, &verify, 4);
+        printf("[set_render_level] Verified: value at %lx = %d\n", addr, verify);
+        return 0;
+    }
+
     // Float pattern search: search for consecutive float values
     // Usage: set_render_level search-float <val1> <val2> ...
     if (argc > 2 && strcmp(argv[1], "search-float") == 0) {
