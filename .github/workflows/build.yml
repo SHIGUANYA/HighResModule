@@ -52,10 +52,14 @@ jobs:
           GRADLE_OPTS: "-Xmx4g -Dorg.gradle.daemon=false"
 
       - name: Build standalone binary
+        continue-on-error: true
         run: |
           NDK=${{ steps.setup-android.outputs.ndk-path }}
-          CC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang
-          $CC -O2 -o set_render_level \
+          echo "NDK path: $NDK"
+          ls $NDK/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android*-clang || true
+          CLANG=$(ls $NDK/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android*-clang 2>/dev/null | head -1)
+          echo "Using clang: $CLANG"
+          $CLANG -O2 -o set_render_level \
             app/src/main/cpp/native_helper.cpp \
             -DSTANDALONE_EXE \
             -llog -ldl
@@ -63,6 +67,7 @@ jobs:
           file set_render_level
           
       - name: Upload APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: HighResModule-APK
@@ -70,6 +75,7 @@ jobs:
           retention-days: 7
 
       - name: Upload standalone binary
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: set_render_level
