@@ -22,9 +22,11 @@ jobs:
         id: setup-android
         uses: android-actions/setup-android@v3
         with:
-          api-level: 34
-          ndk-version: r26c
-          cache: gradle
+          accept-android-sdk-licenses: true
+
+      - name: Install NDK
+        run: |
+          sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
           
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -34,8 +36,10 @@ jobs:
           
       - name: Create local.properties
         run: |
-          echo "sdk.dir=${{ steps.setup-android.outputs.sdk-path }}" > app/local.properties
-          echo "cmake.dir=${{ steps.setup-android.outputs.ndk-path }}/cmake/3.22.1" >> app/local.properties
+          NDK_PATH=$ANDROID_HOME/ndk/26.1.10909125
+          echo "sdk.dir=$ANDROID_HOME" > app/local.properties
+          echo "ndk.dir=$NDK_PATH" >> app/local.properties
+          echo "cmake.dir=$NDK_PATH/cmake/3.22.1" >> app/local.properties
           cat app/local.properties
           
       - name: Generate Gradle Wrapper
@@ -54,10 +58,9 @@ jobs:
       - name: Build standalone binary
         continue-on-error: true
         run: |
-          NDK=${{ steps.setup-android.outputs.ndk-path }}
+          NDK=$ANDROID_HOME/ndk/26.1.10909125
           echo "NDK path: $NDK"
-          ls $NDK/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android*-clang || true
-          CLANG=$(ls $NDK/toolchains/llvm/prebuilt/*/bin/aarch64-linux-android*-clang 2>/dev/null | head -1)
+          CLANG=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android34-clang
           echo "Using clang: $CLANG"
           $CLANG -O2 -o set_render_level \
             app/src/main/cpp/native_helper.cpp \
