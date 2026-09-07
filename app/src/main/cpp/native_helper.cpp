@@ -302,19 +302,35 @@ int main(int argc, char* argv[]) {
     size_t targetLen = strlen(targetStr);
     char line[1024];
 
-    // Collect ALL readable segments of libUE4.so
-    #define MAX_SEGS 128
+    // Collect ALL readable segments from the process (not just libUE4.so)
+    #define MAX_SEGS 512
     uintptr_t segStarts[MAX_SEGS], segEnds[MAX_SEGS];
+    char segNames[MAX_SEGS][128];
     int segCount = 0;
 
     while (fgets(line, sizeof(line), maps)) {
-        if (!strstr(line, "libUE4.so")) continue;
         uintptr_t start, end;
         char perms[8];
         sscanf(line, "%lx-%lx %s", &start, &end, perms);
         if (perms[0] == 'r' && segCount < MAX_SEGS) {
             segStarts[segCount] = start;
             segEnds[segCount] = end;
+            // Extract segment name
+            char* name = segNames[segCount];
+            name[0] = 0;
+            char* p = strrchr(line, '/');
+            if (p) { strncpy(name, p+1, 127); name[127]=0; }
+            else {
+                p = strchr(line, '[');
+                if (p) { 
+                    char* end = strchr(p, ']');
+                    if (end) { strncpy(name, p, end-p+1); name[end-p+1]=0; }
+                    else { strncpy(name, p, 127); name[127]=0; }
+                }
+            }
+            // Remove trailing newline
+            size_t nlen = strlen(name);
+            if (nlen > 0 && name[nlen-1] == '\n') name[nlen-1] = 0;
             segCount++;
         }
     }
@@ -343,12 +359,11 @@ int main(int argc, char* argv[]) {
                         size_t start = i > 32 ? i - 32 : 0;
                         size_t end = i + patLen + 64;
                         if (end > (size_t)nread) end = nread;
-                        // Ensure null termination
                         char str[128] = {0};
                         size_t len = end - start;
                         if (len > 127) len = 127;
                         memcpy(str, buf + start, len);
-                        printf("[set_render_level] Found at %lx: ...%s...\n", addr + i, str);
+                        printf("[set_render_level] Found at %lx (%s): ...%s...\n", addr + i, segNames[s], str);
                         found++;
                         if (found >= 50) { printf("[set_render_level] Too many matches, stopping\n"); free(buf); return 0; }
                         i += patLen - 1;
