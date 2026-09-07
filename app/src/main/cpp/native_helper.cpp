@@ -302,8 +302,9 @@ int main(int argc, char* argv[]) {
     size_t targetLen = strlen(targetStr);
     char line[1024];
 
-    // Collect ALL readable segments from the process (not just libUE4.so)
-    #define MAX_SEGS 2048
+    // Collect useful segments: libUE4.so (all perms) + anonymous rw- (for native heap/globals)
+    // Skip dalvik/ART/stack segments to avoid Java memory
+    #define MAX_SEGS 4096
     uintptr_t segStarts[MAX_SEGS], segEnds[MAX_SEGS];
     char segNames[MAX_SEGS][128];
     int segCount = 0;
@@ -312,31 +313,48 @@ int main(int argc, char* argv[]) {
         uintptr_t start, end;
         char perms[8];
         sscanf(line, "%lx-%lx %s", &start, &end, perms);
-        if (perms[0] == 'r' && segCount < MAX_SEGS) {
-            segStarts[segCount] = start;
-            segEnds[segCount] = end;
-            // Extract segment name
-            char* name = segNames[segCount];
-            name[0] = 0;
-            char* p = strrchr(line, '/');
-            if (p) { strncpy(name, p+1, 127); name[127]=0; }
-            else {
-                p = strchr(line, '[');
-                if (p) { 
-                    char* end = strchr(p, ']');
-                    if (end) { strncpy(name, p, end-p+1); name[end-p+1]=0; }
-                    else { strncpy(name, p, 127); name[127]=0; }
-                }
+        if (perms[0] != 'r') continue;
+        
+        // Skip dalvik/ART/stack/boot segments
+        if (strstr(line, "dalvik") || strstr(line, "boot") || strstr(line, "stack_and_tls") || strstr(line, ".art"))
+            continue;
+        
+        if (segCount >= MAX_SEGS) break;
+        
+        segStarts[segCount] = start;
+        segEnds[segCount] = end;
+        // Extract segment name
+        char* name = segNames[segCount];
+        name[0] = 0;
+        char* bracket = strchr(line, '[');
+        if (bracket) { 
+            char* endb = strchr(bracket, ']');
+            if (endb) { 
+                size_t len = endb - bracket + 1;
+                if (len > 127) len = 127;
+                strncpy(name, bracket, len); 
+                name[len] = 0; 
             }
-            // Remove trailing newline
-            size_t nlen = strlen(name);
-            if (nlen > 0 && name[nlen-1] == '\n') name[nlen-1] = 0;
-            segCount++;
+        } else {
+            // For file-mapped segments, get filename
+            char* slash = strrchr(line, '/');
+            if (slash) { 
+                char* space = strchr(slash, ' ');
+                if (!space) space = slash + strlen(slash);
+                size_t len = space - slash;
+                if (len > 127) len = 127;
+                strncpy(name, slash, len);
+                name[len] = 0;
+            }
         }
+        // Remove trailing newline/whitespace
+        size_t nlen = strlen(name);
+        while (nlen > 0 && (name[nlen-1] == '\n' || name[nlen-1] == ' ')) name[--nlen] = 0;
+        segCount++;
     }
     fclose(maps);
 
-    printf("[set_render_level] Found %d readable segments\n", segCount);
+    printf("[set_render_level] Found %d useful segments (skipped dalvik/ART)\n", segCount);
 
     // Search mode: find all strings matching a pattern
     if (argc > 2 && strcmp(argv[1], "search") == 0) {
