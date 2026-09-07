@@ -444,7 +444,7 @@ int main(int argc, char* argv[]) {
 
     // Dump mode: read and print a region around a given address
     // Usage: set_render_level dump <hex_address> [size_bytes]
-    if (argc > 2 && strcmp(argv[1], "dump") == 0) {
+    if (argc >= 3 && strcmp(argv[1], "dump") == 0) {
         uintptr_t addr = strtoul(argv[2], nullptr, 16);
         size_t dumpSize = 512;
         if (argc > 3) dumpSize = atoi(argv[3]);
@@ -477,7 +477,7 @@ int main(int argc, char* argv[]) {
 
     // Write-int mode: write an int32 to a remote address
     // Usage: set_render_level write-int <hex_address> <value>
-    if (argc > 4 && strcmp(argv[1], "write-int") == 0) {
+    if (argc >= 4 && strcmp(argv[1], "write-int") == 0) {
         uintptr_t addr = strtoul(argv[2], nullptr, 16);
         int32_t value = atoi(argv[3]);
         printf("[set_render_level] Writing int32 %d to %lx\n", value, addr);
