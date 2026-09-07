@@ -1,11 +1,11 @@
 package com.hook.highres;
 
 import android.util.Log;
-import de.robv.android.xposed.IXposedHookLoadPackage;
-import de.robv.android.xposed.XC_MethodHook;
-import de.robv.android.xposed.XposedBridge;
-import de.robv.android.xposed.XposedHelpers;
-import de.robv.android.xposed.XC_LoadPackage.LoadPackageParam;
+import v.Bsgm.HDFKz.IXposedHookLoadPackage;
+import v.Bsgm.HDFKz.XC_MethodHook;
+import v.Bsgm.HDFKz.XposedBridge;
+import v.Bsgm.HDFKz.callbacks.XC_LoadPackage;
+import v.Bsgm.HDFKz.callbacks.XC_LoadPackage.LoadPackageParam;
 
 public class HighResModule implements IXposedHookLoadPackage {
     private static final String TAG = "HighResModule";
@@ -22,24 +22,20 @@ public class HighResModule implements IXposedHookLoadPackage {
 
     private void hookSystemLoadLibrary(LoadPackageParam lpparam) {
         try {
-            XposedHelpers.findAndHookMethod(
-                System.class,
-                "loadLibrary",
-                String.class,
-                new XC_MethodHook() {
-                    @Override
-                    protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-                        String libName = (String) param.args[0];
-                        Log.i(TAG, "System.loadLibrary: " + libName);
-                        if ("UE4".equals(libName) || "gn_game".equals(libName)) {
-                            Log.i(TAG, "Native lib loaded: " + libName);
-                            XposedBridge.log("HighResModule: native lib loaded: " + libName);
-                            Thread.sleep(3000);
-                            trySetRenderLevel();
-                        }
+            java.lang.reflect.Method loadLib = System.class.getDeclaredMethod("loadLibrary", String.class);
+            Object unhook = XposedBridge.hookMethod(loadLib, new XC_MethodHook() {
+                @Override
+                protected void afterHookedMethod(MethodHookParam param) throws Throwable {
+                    String libName = (String) param.args[0];
+                    Log.i(TAG, "System.loadLibrary: " + libName);
+                    if ("UE4".equals(libName) || "gn_game".equals(libName)) {
+                        Log.i(TAG, "Native lib loaded: " + libName);
+                        XposedBridge.log("HighResModule: native lib loaded: " + libName);
+                        Thread.sleep(3000);
+                        trySetRenderLevel();
                     }
                 }
-            );
+            });
             Log.i(TAG, "Hooked System.loadLibrary");
         } catch (Throwable t) {
             Log.w(TAG, "Failed to hook System.loadLibrary: " + t.getMessage());
