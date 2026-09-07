@@ -51,6 +51,5 @@ repositories {
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
-    // Xposed API is bundled locally as stubs (no external dependency needed)
-    // The actual XposedBridge is provided by LSPosed at runtime
+    compileOnly(files("libs/xposed-api.jar"))
 }
