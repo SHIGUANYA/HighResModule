@@ -7,7 +7,7 @@ public class HighResModule {
     private static final String TARGET_PKG = "com.tencent.tmgp.gnyx";
 
     public void handleLoadPackage(Object lpparam) throws Throwable {
-        String packageName = getFieldValue(lpparam, "packageName");
+        String packageName = (String) getFieldValue(lpparam, "packageName");
         if (!TARGET_PKG.equals(packageName)) return;
 
         Log.i(TAG, "=== Loaded in " + packageName + " ===");
