@@ -304,9 +304,10 @@ int main(int argc, char* argv[]) {
 
     // Collect useful segments: libUE4.so (all perms) + anonymous rw- (for native heap/globals)
     // Skip dalvik/ART/stack segments to avoid Java memory
-    #define MAX_SEGS 4096
-    uintptr_t segStarts[MAX_SEGS], segEnds[MAX_SEGS];
-    char segNames[MAX_SEGS][128];
+    #define MAX_SEGS 16384
+    uintptr_t* segStarts = (uintptr_t*)malloc(MAX_SEGS * sizeof(uintptr_t));
+    uintptr_t* segEnds = (uintptr_t*)malloc(MAX_SEGS * sizeof(uintptr_t));
+    char (*segNames)[64] = (char (*)[64])malloc(MAX_SEGS * 64);
     int segCount = 0;
 
     while (fgets(line, sizeof(line), maps)) {
@@ -326,27 +327,27 @@ int main(int argc, char* argv[]) {
         // Extract segment name
         char* name = segNames[segCount];
         name[0] = 0;
-        char* bracket = strchr(line, '[');
-        if (bracket) { 
-            char* endb = strchr(bracket, ']');
-            if (endb) { 
-                size_t len = endb - bracket + 1;
-                if (len > 127) len = 127;
-                strncpy(name, bracket, len); 
-                name[len] = 0; 
+            char* bracket = strchr(line, '[');
+            if (bracket) { 
+                char* endb = strchr(bracket, ']');
+                if (endb) { 
+                    size_t len = endb - bracket + 1;
+                    if (len > 63) len = 63;
+                    strncpy(name, bracket, len); 
+                    name[len] = 0; 
+                }
+            } else {
+                // For file-mapped segments, get filename
+                char* slash = strrchr(line, '/');
+                if (slash) { 
+                    char* space = strchr(slash, ' ');
+                    if (!space) space = slash + strlen(slash);
+                    size_t len = space - slash;
+                    if (len > 63) len = 63;
+                    strncpy(name, slash, len);
+                    name[len] = 0;
+                }
             }
-        } else {
-            // For file-mapped segments, get filename
-            char* slash = strrchr(line, '/');
-            if (slash) { 
-                char* space = strchr(slash, ' ');
-                if (!space) space = slash + strlen(slash);
-                size_t len = space - slash;
-                if (len > 127) len = 127;
-                strncpy(name, slash, len);
-                name[len] = 0;
-            }
-        }
         // Remove trailing newline/whitespace
         size_t nlen = strlen(name);
         while (nlen > 0 && (name[nlen-1] == '\n' || name[nlen-1] == ' ')) name[--nlen] = 0;
