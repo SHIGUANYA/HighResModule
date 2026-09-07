@@ -51,5 +51,4 @@ repositories {
 
 dependencies {
     implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.0")
-    compileOnly(files("libs/xposed-api.jar"))
 }
